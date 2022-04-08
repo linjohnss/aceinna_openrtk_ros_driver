@@ -1,5 +1,5 @@
 <launch>
-    <arg name="brviz" default="true"/>
+    <arg name="brviz" default="false"/>
     <arg name="bplot" default="false"/>
 
     <!-- Load urdf -->

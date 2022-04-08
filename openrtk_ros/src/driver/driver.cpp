@@ -54,7 +54,8 @@ RTKDriver::RTKDriver(ros::NodeHandle nh)
     ROS_INFO("device: %s", m_rtk.m_port.c_str());
     ROS_INFO("baud: %d", m_rtk.m_baud);
 
-    rtk_pub_imu  = m_nh.advertise<openrtk_msg::openrtk_imu>("topic_rtk_imu", 100);
+    // rtk_pub_imu  = m_nh.advertise<openrtk_msg::openrtk_imu>("topic_rtk_imu", 100);
+    rtk_pub_imu  = m_nh.advertise<sensor_msgs::Imu>("topic_rtk_imu", 100);
     rtk_pub_gnss = m_nh.advertise<openrtk_msg::openrtk_gnss>("topic_rtk_gnss", 100);
     rtk_pub_ins  = m_nh.advertise<openrtk_msg::openrtk_ins>("topic_rtk_ins", 100);
 }
@@ -80,36 +81,36 @@ void RTKDriver::Start()
     ROS_INFO("Device is opened successfully. [%s:%d]", m_rtk.m_port.c_str(), m_rtk.m_baud);
 
     /*Start TCP Server Init*/
-    while((bind(sock_Ser,(struct sockaddr *)&addr_server,sockstrlen) < 0)           /*try to bind at most 10s*/
-        && (cnt < 10))
-    {
-        cout << "bind server addr error" << endl; 
-        usleep(1000); // 1 ms   
-        cnt++;
-    }
+    // while((bind(sock_Ser,(struct sockaddr *)&addr_server,sockstrlen) < 0)           /*try to bind at most 10s*/
+    //     && (cnt < 10))
+    // {
+    //     cout << "bind server addr error" << endl; 
+    //     usleep(1000); // 1 ms   
+    //     cnt++;
+    // }
 
-    cnt = 0;
-    while((listen(sock_Ser, 30) < 0) && (cnt < 10))
-    {
-        cout << "listen server  error" << endl;
-        usleep(1000); // 1 ms
-        cnt++;
-    }
+    // cnt = 0;
+    // while((listen(sock_Ser, 30) < 0) && (cnt < 10))
+    // {
+    //     cout << "listen server  error" << endl;
+    //     usleep(1000); // 1 ms
+    //     cnt++;
+    // }
 
-    cnt = 0;
-    while((sock_Cli < 0) && (cnt < 10))
-    {
-        sock_Cli = accept(sock_Ser,(struct sockaddr *)&addr_sensor,&sockstrlen);
-        if(sock_Cli == -1)
-        {
-            cout << "call to accept" << endl;
-            usleep(1000); // 1 ms
-            cnt++;
-            continue;
-        }
-        inet_ntop(AF_INET,&addr_sensor.sin_addr,(char*)hostname,sizeof(hostname));  
-        cout << "client name is " << hostname << "port is " << addr_sensor.sin_port << endl;
-    }
+    // cnt = 0;
+    // while((sock_Cli < 0) && (cnt < 10))
+    // {
+    //     sock_Cli = accept(sock_Ser,(struct sockaddr *)&addr_sensor,&sockstrlen);
+    //     if(sock_Cli == -1)
+    //     {
+    //         cout << "call to accept" << endl;
+    //         usleep(1000); // 1 ms
+    //         cnt++;
+    //         continue;
+    //     }
+    //     inet_ntop(AF_INET,&addr_sensor.sin_addr,(char*)hostname,sizeof(hostname));  
+    //     cout << "client name is " << hostname << "port is " << addr_sensor.sin_port << endl;
+    // }
     //system(OPENRTK_GET_HOSTIP);
     /*End TCP Server Init*/
 
@@ -122,10 +123,10 @@ void RTKDriver::Start()
     m_eth_exit.unlock();
 
     /* UART port is enabled by default */
-    //m_GetUartDataThread = std::thread(&RTKDriver::ThreadGetDataUart, this);
+    m_GetUartDataThread = std::thread(&RTKDriver::ThreadGetDataUart, this);
 
     /* Comment the line above, and uncomment the line below to enable Ethernet */
-     m_GetEthDataThread  = std::thread(&RTKDriver::ThreadGetDataEth, this);    
+    //  m_GetEthDataThread  = std::thread(&RTKDriver::ThreadGetDataEth, this);    
 
     signal(SIGINT, SigintHandler);
     Spin();
@@ -411,7 +412,7 @@ string RTKDriver::Bytestohexstring(uint8_t* bytes,int bytelength)
     str += " ";
   }
   return str;  
-}  
+}
 
 /***Handle RTK IMU Message***/
 void RTKDriver::Handle_RtkIMUMessage(uint8_t* frame, uint16_t len)
@@ -422,24 +423,26 @@ void RTKDriver::Handle_RtkIMUMessage(uint8_t* frame, uint16_t len)
         ROS_WARN("RTK_IMU Frame size error!");
         return;
     }
-
+    float convert_rads = M_PI /180;
     stRTKIMUS1 *S1Msg = (stRTKIMUS1*)(&frame[5]);
-    openrtk_msg::openrtk_imu imu_data;
+    sensor_msgs::Imu imu_data;
 
-    imu_data.header.frame_id = "RTK_IMU";
+    imu_data.header.frame_id = "imu_link";
     imu_data.header.stamp = ros::Time::now();
 
     /*****to avoid byte alignment problem, 
      * it's better to Assignment one by one*****/
-    imu_data.gps_week       = S1Msg->gps_week;
-    imu_data.gps_millisecs  = S1Msg->gps_millisecs;
-    imu_data.x_acceleration = S1Msg->x_acceleration;
-    imu_data.y_acceleration = S1Msg->y_acceleration;
-    imu_data.z_acceleration = S1Msg->z_acceleration;
-    imu_data.x_gyro_rate    = S1Msg->x_gyro_rate;
-    imu_data.y_gyro_rate    = S1Msg->y_gyro_rate;
-    imu_data.z_gyro_rate    = S1Msg->z_gyro_rate;
-
+    imu_data.orientation_covariance[0] = 0;
+    imu_data.linear_acceleration.x = S1Msg->x_acceleration; 
+    imu_data.linear_acceleration.y = S1Msg->y_acceleration;
+    imu_data.linear_acceleration.z = S1Msg->z_acceleration;
+    imu_data.linear_acceleration_covariance[0] = 0;
+    imu_data.angular_velocity.x = S1Msg->x_gyro_rate * convert_rads;
+    imu_data.angular_velocity.y = S1Msg->y_gyro_rate * convert_rads;
+    imu_data.angular_velocity.z = S1Msg->z_gyro_rate * convert_rads;
+    imu_data.angular_velocity_covariance[0] = 0;
+    
+    // ROS_INFO("%f", imu_data.x_acceleration);
     rtk_pub_imu.publish(imu_data);
 }
 
