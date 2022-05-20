@@ -54,10 +54,11 @@ RTKDriver::RTKDriver(ros::NodeHandle nh)
     ROS_INFO("device: %s", m_rtk.m_port.c_str());
     ROS_INFO("baud: %d", m_rtk.m_baud);
 
-    // rtk_pub_imu  = m_nh.advertise<openrtk_msg::openrtk_imu>("topic_rtk_imu", 100);
-    rtk_pub_imu  = m_nh.advertise<sensor_msgs::Imu>("topic_rtk_imu", 100);
+    rtk_pub_imu  = m_nh.advertise<openrtk_msg::openrtk_imu>("topic_rtk_imu", 100);
     rtk_pub_gnss = m_nh.advertise<openrtk_msg::openrtk_gnss>("topic_rtk_gnss", 100);
     rtk_pub_ins  = m_nh.advertise<openrtk_msg::openrtk_ins>("topic_rtk_ins", 100);
+    rtk_pub_imu_ros  = m_nh.advertise<sensor_msgs::Imu>("topic_rtk_imu_ros", 100);
+    rtk_pub_gnss_ros = m_nh.advertise<sensor_msgs::NavSatFix>("topic_rtk_gnss_ros", 100);
 }
 
 RTKDriver::~RTKDriver()
@@ -425,25 +426,45 @@ void RTKDriver::Handle_RtkIMUMessage(uint8_t* frame, uint16_t len)
     }
     float convert_rads = M_PI /180;
     stRTKIMUS1 *S1Msg = (stRTKIMUS1*)(&frame[5]);
-    sensor_msgs::Imu imu_data;
+    openrtk_msg::openrtk_imu imu_data;
+    sensor_msgs::Imu imu_data_ros;
 
     imu_data.header.frame_id = "imu_link";
     imu_data.header.stamp = ros::Time::now();
 
+    imu_data_ros.header.frame_id = "imu_link";
+    float t = static_cast<float>(S1Msg->gps_millisecs);
+    uint32_t sec = S1Msg->gps_week*604800 + S1Msg->gps_millisecs/1000;
+    uint32_t nsec = (S1Msg->gps_millisecs - S1Msg->gps_millisecs/1000 *1000)*1000000;
+    imu_data_ros.header.stamp = ros::Time(sec ,nsec); //GPSTIME
+    // imu_data_ros.header.stamp = ros::Time::now(); //UNIXTIME
+
     /*****to avoid byte alignment problem, 
      * it's better to Assignment one by one*****/
-    imu_data.orientation_covariance[0] = 0;
-    imu_data.linear_acceleration.x = S1Msg->x_acceleration; 
-    imu_data.linear_acceleration.y = S1Msg->y_acceleration;
-    imu_data.linear_acceleration.z = S1Msg->z_acceleration;
-    imu_data.linear_acceleration_covariance[0] = 0;
-    imu_data.angular_velocity.x = S1Msg->x_gyro_rate * convert_rads;
-    imu_data.angular_velocity.y = S1Msg->y_gyro_rate * convert_rads;
-    imu_data.angular_velocity.z = S1Msg->z_gyro_rate * convert_rads;
-    imu_data.angular_velocity_covariance[0] = 0;
-    
-    // ROS_INFO("%f", imu_data.x_acceleration);
+    imu_data.gps_week       = S1Msg->gps_week;
+    imu_data.gps_millisecs  = S1Msg->gps_millisecs;
+    imu_data.x_acceleration = S1Msg->x_acceleration;
+    imu_data.y_acceleration = S1Msg->y_acceleration;
+    imu_data.z_acceleration = S1Msg->z_acceleration;
+    imu_data.x_gyro_rate    = S1Msg->x_gyro_rate;
+    imu_data.y_gyro_rate    = S1Msg->y_gyro_rate;
+    imu_data.z_gyro_rate    = S1Msg->z_gyro_rate;
+
     rtk_pub_imu.publish(imu_data);
+
+
+
+    imu_data_ros.orientation_covariance[0]         = 0;
+    imu_data_ros.linear_acceleration.x             = S1Msg->x_acceleration; 
+    imu_data_ros.linear_acceleration.y             = S1Msg->y_acceleration;
+    imu_data_ros.linear_acceleration.z             = S1Msg->z_acceleration;
+    imu_data_ros.linear_acceleration_covariance[0] = 0;
+    imu_data_ros.angular_velocity.x                = S1Msg->x_gyro_rate * convert_rads;
+    imu_data_ros.angular_velocity.y                = S1Msg->y_gyro_rate * convert_rads;
+    imu_data_ros.angular_velocity.z                = S1Msg->z_gyro_rate * convert_rads;
+    imu_data_ros.angular_velocity_covariance[0]    = 0;
+    
+    rtk_pub_imu_ros.publish(imu_data_ros);
 }
 
 /***Handle RTK INS Message***/
@@ -502,9 +523,17 @@ void RTKDriver::Handle_RtkGNSSMessage(uint8_t* frame, uint16_t len)
 
     stRTKGNSSG1 *G1Msg = (stRTKGNSSG1*)(&frame[5]);
     openrtk_msg::openrtk_gnss gnss_data;
+    sensor_msgs::NavSatFix gnss_data_ros;
 
     gnss_data.header.frame_id = "RTK_GNSS";
     gnss_data.header.stamp = ros::Time::now();
+
+    gnss_data_ros.header.frame_id = "RTK_GNSS";
+    float t = static_cast<float>(G1Msg->gps_millisecs);
+    uint32_t sec = G1Msg->gps_week*604800 + G1Msg->gps_millisecs/1000;
+    uint32_t nsec = (G1Msg->gps_millisecs - G1Msg->gps_millisecs/1000 *1000)*1000000;
+    gnss_data_ros.header.stamp = ros::Time(sec ,nsec); //GPSTIME
+    // gnss_data_ros.header.stamp = ros::Time::now(); //UNIXTIME
 
     /*****to avoid byte alignment problem, 
      * it's better to Assignment one by one*****/
@@ -529,4 +558,15 @@ void RTKDriver::Handle_RtkGNSSMessage(uint8_t* frame, uint16_t len)
     gnss_data.up_vel_std_deviation          = G1Msg->up_vel_std_deviation;
 
     rtk_pub_gnss.publish(gnss_data);
+
+    gnss_data_ros.status.status = G1Msg->position_type;
+	gnss_data_ros.status.service = G1Msg->num_satellite_in_solution;
+	gnss_data_ros.latitude  = G1Msg->latitude;
+	gnss_data_ros.longitude = G1Msg->longitude;
+	gnss_data_ros.altitude  = G1Msg->height;
+	gnss_data_ros.position_covariance[0] = G1Msg->latitude_std_deviation;
+    gnss_data_ros.position_covariance[4] = G1Msg->longitude_std_deviation;
+    gnss_data_ros.position_covariance[8] = G1Msg->height_std_deviation;
+    
+    rtk_pub_gnss_ros.publish(gnss_data_ros);
 }

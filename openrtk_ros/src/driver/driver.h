@@ -17,6 +17,7 @@ using namespace std;
 #include <signal.h>
 #include <ros/ros.h>
 #include <sensor_msgs/Imu.h>
+#include <sensor_msgs/NavSatFix.h>
 #include <tf/transform_broadcaster.h>
 #include "serial/serial.h"
 #include "rtk.h"
@@ -55,7 +56,9 @@ public:
 private:
     ros::NodeHandle m_nh;
     ros::Publisher rtk_pub_imu;
+    ros::Publisher rtk_pub_imu_ros;
     ros::Publisher rtk_pub_gnss;
+    ros::Publisher rtk_pub_gnss_ros;
     ros::Publisher rtk_pub_ins;
     CRTK m_rtk;
     string m_topic;
