@@ -16,16 +16,9 @@ const float r2d = 180/3.14159265;
 #define     UART_BYTESIZE       8
 #define     UART_STOPBIT        (1)                     /**1:One Bit; 2:Two Bit; 1.5:One Point Five**/
 
-/******NetBios Addr and Port******/
-#define     NETBIOS_BROADCAST_ADDR  "192.168.20.255"
-#define     NETBIOS_OADCAST_PORT    137 
-
-#define     LOCAL_PORT              2204                        //
-#define     LOCAL_IP_ADDRESS        "192.168.20.203"            //here ,it is your ROS IP ,you should change it
 #define     PACKAGE_TYPE_IDX        2
 #define     PAYLOAD_LEN_IDX         4
 #define     MAX_FRAME_LIMIT         256  // assume max len of frame is smaller than MAX_FRAME_LIMIT.
-#define     OPENRTK_GET_HOSTIP      "python3 ~/catkin_ws/src/openrtk_ros/netbios.py"
 
 const uint8_t HEADER[2] = {0X55, 0X55};
 const uint8_t HandStr[] = {"hello pc i'm openrtk_data"};
@@ -39,17 +32,6 @@ RTKDriver::RTKDriver(ros::NodeHandle nh)
     /* You need to change PortID and Baudrate, others use default*/
     m_rtk.m_port = string(UART_PORT_ID);
     m_rtk.m_baud = UART_BAUDRATE;
-
-    /*Eth init*/
-    sockstrlen = sizeof(struct sockaddr_in); 
-    sock_Cli = -1;
-    /*******server Addr Init********/   
-    sock_Ser = socket(AF_INET, SOCK_STREAM, 0);   
-    memset(&addr_server, 0, sizeof(addr_server));   
-    memset(&addr_sensor, 0, sizeof(addr_sensor));
-    addr_server.sin_family = AF_INET;    
-    addr_server.sin_addr.s_addr = inet_addr(LOCAL_IP_ADDRESS); 
-    addr_server.sin_port = htons(LOCAL_PORT); 
 
     ROS_INFO("device: %s", m_rtk.m_port.c_str());
     ROS_INFO("baud: %d", m_rtk.m_baud);
@@ -81,53 +63,12 @@ void RTKDriver::Start()
     }
     ROS_INFO("Device is opened successfully. [%s:%d]", m_rtk.m_port.c_str(), m_rtk.m_baud);
 
-    /*Start TCP Server Init*/
-    // while((bind(sock_Ser,(struct sockaddr *)&addr_server,sockstrlen) < 0)           /*try to bind at most 10s*/
-    //     && (cnt < 10))
-    // {
-    //     cout << "bind server addr error" << endl; 
-    //     usleep(1000); // 1 ms   
-    //     cnt++;
-    // }
-
-    // cnt = 0;
-    // while((listen(sock_Ser, 30) < 0) && (cnt < 10))
-    // {
-    //     cout << "listen server  error" << endl;
-    //     usleep(1000); // 1 ms
-    //     cnt++;
-    // }
-
-    // cnt = 0;
-    // while((sock_Cli < 0) && (cnt < 10))
-    // {
-    //     sock_Cli = accept(sock_Ser,(struct sockaddr *)&addr_sensor,&sockstrlen);
-    //     if(sock_Cli == -1)
-    //     {
-    //         cout << "call to accept" << endl;
-    //         usleep(1000); // 1 ms
-    //         cnt++;
-    //         continue;
-    //     }
-    //     inet_ntop(AF_INET,&addr_sensor.sin_addr,(char*)hostname,sizeof(hostname));  
-    //     cout << "client name is " << hostname << "port is " << addr_sensor.sin_port << endl;
-    // }
-    //system(OPENRTK_GET_HOSTIP);
-    /*End TCP Server Init*/
-
     m_uart_exit.lock();
     m_uartBexit = false;
     m_uart_exit.unlock();
 
-    m_eth_exit.lock();                  /* we just init , you can use it in data prosess thread*/
-    m_EthBexit = false;
-    m_eth_exit.unlock();
-
     /* UART port is enabled by default */
-    m_GetUartDataThread = std::thread(&RTKDriver::ThreadGetDataUart, this);
-
-    /* Comment the line above, and uncomment the line below to enable Ethernet */
-    //  m_GetEthDataThread  = std::thread(&RTKDriver::ThreadGetDataEth, this);    
+    m_GetUartDataThread = std::thread(&RTKDriver::ThreadGetDataUart, this);  
 
     signal(SIGINT, SigintHandler);
     Spin();
@@ -144,13 +85,6 @@ void RTKDriver::Stop()
         }
         SAFEDELETE(m_pserial);
     }
-
-    close(sock_Ser);        //close Eth server and client socket
-    close(sock_Cli);
-
-    m_eth_exit.lock();
-    m_EthBexit = true;
-    m_eth_exit.unlock();
 
     m_uart_exit.lock();
     m_uartBexit = true;
@@ -172,9 +106,7 @@ bool RTKDriver::Spin()
 
     size_t max_sz = 256;
     uint8_t *buf = new uint8_t[max_sz];
-    //size_t max_eth = 1472;                        /****** it is better to get data here,and push into fifo *******/
-    //uint8_t *recvBuf = new uint8_t[max_sz];
-    //uint16_t  recvNum = 0;
+
     while (ros::ok())
     {
         /*
@@ -278,66 +210,6 @@ void RTKDriver::ThreadGetDataUart()
             }
             sync_pattern.resize(2, 0);
         }
-    }
-}
-
-/******here we just use socket*****/
-void RTKDriver::ThreadGetDataEth(void)
-{ 
-    uint16_t index = 0;
-    int32_t  recvNum = 0;
-    uint8_t  recvBuf[1472] = {0};
-    uint16_t packet_crc = 0;
-    uint16_t packet_len = 0;
-    uint8_t  packet_buf[MAX_FRAME_LIMIT] = {0};
-    
-    while(1)
-    {
-	recvNum = recvfrom(sock_Cli, recvBuf, sizeof(recvBuf), 0, (struct sockaddr*)&addr_sensor, &sockstrlen); 
-
-	if(recvNum < 0)    
-	{    
-	    cout << "recvfrom error:" <<endl;     
-            continue; 
-	}   
-
-        if((recvBuf[0] == 0x68) && (recvBuf[1] == 0x65))        //we receive string "hello pc,i'm openrtk_data", and should send back string "log debug on"
-        {                                                       //here we just check 'h' and 'e', it is easier than strcmp or others
-            sendto(sock_Cli, Handbk, sizeof(Handbk), 0, (struct sockaddr*)&addr_sensor, sockstrlen);
-            cout << "Hand Back" << endl;
-        } 
-        else
-        {
-            recvNum--;                                      //to aviod Array out of bounds
-            index = 0;
-            while(index < recvNum)
-            {
-                if((recvBuf[index] == HEADER[0]) && (recvBuf[index+1] == HEADER[1]))
-                {
-                    packet_len = recvBuf[index + 4] + 7;                            //you can refer to user meanual
-                    memcpy(packet_buf, &recvBuf[index], packet_len);                //here we use another buff, it seems more clear
-                    packet_crc = 256 * packet_buf[packet_len - 2] + packet_buf[packet_len - 1];
-
-                    if (packet_crc == calcCRC(&packet_buf[PACKAGE_TYPE_IDX], packet_len - 4)) // 4: len of header 'UU', and len of checksum.
-                    {
-                        // find a whole frame
-                        ParseFrame(packet_buf, packet_len);
-                        //cout << "packet_buf : " << Bytestohexstring(packet_buf, packet_len) << endl;
-                    }
-                    else
-                    {
-                        cout << "Buf data error! : " << Bytestohexstring(packet_buf, packet_len) << endl;
-                        cout << "please check header and CRC" << endl;
-                    }        
-                    index += packet_len;
-                }
-                else
-                {
-                    index++;                    
-                }
-            }
-        }
-		usleep(1000);
     }
 }
 
@@ -451,8 +323,6 @@ void RTKDriver::Handle_RtkIMUMessage(uint8_t* frame, uint16_t len)
     imu_data.z_gyro_rate    = S1Msg->z_gyro_rate;
 
     rtk_pub_imu.publish(imu_data);
-
-
 
     imu_data_ros.orientation_covariance[0]         = 0;
     imu_data_ros.linear_acceleration.x             = S1Msg->x_acceleration; 

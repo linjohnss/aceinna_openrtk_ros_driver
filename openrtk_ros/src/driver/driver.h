@@ -26,9 +26,6 @@ using namespace std;
 #include "openrtk_msg/openrtk_imu.h"
 #include "openrtk_msg/openrtk_gnss.h"
 #include "openrtk_msg/openrtk_ins.h"
-#include <sys/socket.h>     
-#include <netinet/in.h>     
-#include <arpa/inet.h>  
 
 class RTKDriver
 {
@@ -42,8 +39,6 @@ public:
 
     static void SigintHandler(int sig);
     void ThreadGetDataUart(void);
-    void ThreadGetDataEth(void);
-    //void ThreadGetDataCAN(void);
 
     void ParseFrame(uint8_t* frame, uint16_t len);
     void Handle_RtkGNSSMessage(uint8_t* frame, uint16_t len);
@@ -64,24 +59,11 @@ private:
     string m_topic;
     serial::Serial* m_pserial;
 
-    /*******Eth Port******/
-    struct sockaddr_in addr_sensor;  
-    struct sockaddr_in addr_server; 
-    uint32_t sockstrlen;
-    int32_t sock_Cli; 
-    int32_t sock_Ser; 
-    /*******Eth Port******/
-
     std::mutex m_mt_buf;
     queue<uint8_t> m_uartBuf;
-    queue<uint8_t> m_ethBuf;
 
     bool m_uartBexit;
-    bool m_EthBexit;
     std::mutex m_uart_exit;
-    std::mutex m_eth_exit;
     std::thread m_GetUartDataThread;
-    std::thread m_GetEthDataThread;
-    std::thread m_GetCANDataThread;
 };
 
